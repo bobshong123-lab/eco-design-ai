@@ -11,7 +11,7 @@ export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
-    const { messages, userContext } = await req.json();
+    const { messages, topic, systemPrompt: customSystemPrompt } = await req.json();
     
     const lastMessage = messages[messages.length - 1];
     const userQuery = lastMessage.content;
@@ -20,8 +20,12 @@ export async function POST(req: Request) {
     const relevantKnowledge = retrieveKnowledge(userQuery);
     const knowledgeContext = relevantKnowledge.join('\n\n');
     
-    // 构建系统提示
-    const systemPrompt = `你是"生态设计AI助手"，专门为用户提供自然建筑和生态设计方面的专业咨询。
+    // 使用主题自定义系统提示，或回退到通用提示
+    let systemPrompt = customSystemPrompt;
+    
+    // 如果是通用主题，添加知识库参考
+    if (topic === 'general' || !customSystemPrompt) {
+      systemPrompt = `你是"生态设计AI助手"，专门为用户提供自然建筑和生态设计方面的专业咨询。
     
 ## 你的专长领域
 1. 泥土建筑技术：土团房、土袋房、夯土墙、土砖、竹编泥墙
@@ -38,20 +42,24 @@ ${JSON.stringify(climateRecommendations, null, 2)}
 ## 地形基础建议
 ${JSON.stringify(terrainAdvice, null, 2)}
 
-## 用户背景信息
-${userContext ? `用户所在地区：${userContext.location || '未提供'}
-气候类型：${userContext.climate || '未提供'}
-地形：${userContext.terrain || '未提供'}
-预算范围：${userContext.budget || '未提供'}
-建筑需求：${userContext.needs || '未提供'}` : '用户未提供具体背景信息'}
-
 ## 回答要求
 1. 优先根据用户的具体情况（气候、地形、预算、需求）推荐适合的建筑类型
 2. 结合知识库中的技术细节给出具体建议
 3. 给出材料配方、施工要点、预算估算等实用信息
-4. 如需更多详细信息，可以反问用户以获取更多背景
-5. 回答要专业、详细、实用，使用markdown格式组织内容
-6. 如果用户没有提供位置、气候等信息，主动询问`;
+4. 回答要专业、详细、实用，使用markdown格式组织内容
+5. 如果用户没有提供位置、气候等信息，主动询问`;
+    } else {
+      // 主题特定提示 + 知识库参考
+      systemPrompt = `${customSystemPrompt}
+
+## 知识库参考
+${knowledgeContext}
+
+## 回答要求
+1. 只回答与本主题相关的内容
+2. 给出具体的技术参数和操作步骤
+3. 使用markdown格式组织内容`;
+    }
 
     // 调用 OpenAI API
     const openai = getOpenAI();

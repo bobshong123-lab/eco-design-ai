@@ -1,32 +1,87 @@
 'use client';
 
-import { useCompletion } from 'ai/react';
 import { useRef, useEffect, useState } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, Trash2, ArrowLeft } from 'lucide-react';
 import { Message } from './Message';
 import { cn } from '@/lib/utils';
+import { TopicId, topics, getTopicStorageKey } from '@/lib/topics';
 
 interface ChatWindowProps {
-  userContext?: {
-    location?: string;
-    climate?: string;
-    terrain?: string;
-    budget?: string;
-    needs?: string;
-  };
+  topicId: TopicId;
+  onBack?: () => void;
 }
 
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  timestamp: number;
 }
 
-export function ChatWindow({ userContext }: ChatWindowProps) {
+// Maximum number of messages to store
+const MAX_MESSAGES = 50;
+
+// Helper function to save messages to localStorage
+function saveToLocalStorage(messages: ChatMessage[], topicId: TopicId) {
+  try {
+    const key = getTopicStorageKey(topicId);
+    localStorage.setItem(key, JSON.stringify(messages));
+  } catch (error) {
+    console.error('Failed to save to localStorage:', error);
+  }
+}
+
+// Helper function to load messages from localStorage
+function loadFromLocalStorage(topicId: TopicId): ChatMessage[] {
+  try {
+    const key = getTopicStorageKey(topicId);
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (error) {
+    console.error('Failed to load from localStorage:', error);
+  }
+  return [];
+}
+
+export function ChatWindow({ topicId, onBack }: ChatWindowProps) {
+  const topic = topics[topicId];
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load messages from localStorage on mount
+  useEffect(() => {
+    const storedMessages = loadFromLocalStorage(topicId);
+    if (storedMessages.length > 0) {
+      setMessages(storedMessages);
+    }
+    setIsLoaded(true);
+  }, [topicId]);
+
+  // Save messages to localStorage when messages change (only after initial load)
+  useEffect(() => {
+    if (isLoaded) {
+      // Enforce storage limit
+      let trimmedMessages = messages;
+      if (messages.length > MAX_MESSAGES) {
+        trimmedMessages = messages.slice(-MAX_MESSAGES);
+        setMessages(trimmedMessages);
+      }
+      saveToLocalStorage(trimmedMessages, topicId);
+    }
+  }, [messages, isLoaded, topicId]);
+
+  // Handle clear chat
+  const handleClearChat = () => {
+    if (confirm('确定要清空所有对话记录吗？此操作不可恢复。')) {
+      setMessages([]);
+      localStorage.removeItem(getTopicStorageKey(topicId));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,6 +91,7 @@ export function ChatWindow({ userContext }: ChatWindowProps) {
       id: Date.now().toString(),
       role: 'user',
       content: input,
+      timestamp: Date.now(),
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -48,7 +104,8 @@ export function ChatWindow({ userContext }: ChatWindowProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [...messages, userMessage],
-          userContext,
+          topic: topicId,
+          systemPrompt: topic.systemPrompt,
         }),
       });
 
@@ -72,6 +129,7 @@ export function ChatWindow({ userContext }: ChatWindowProps) {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: assistantMessage,
+        timestamp: Date.now(),
       };
 
       setMessages(prev => [...prev, assistantMsg]);
@@ -81,6 +139,7 @@ export function ChatWindow({ userContext }: ChatWindowProps) {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: '抱歉，发生了错误，请稍后重试。',
+        timestamp: Date.now(),
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
@@ -96,9 +155,34 @@ export function ChatWindow({ userContext }: ChatWindowProps) {
   return (
     <div className="flex flex-col h-full bg-white rounded-2xl overflow-hidden border border-earth-200">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-earth-200 bg-gradient-to-r from-primary-50 to-white">
-        <h2 className="text-lg font-semibold text-earth-900">智能咨询</h2>
-        <p className="text-sm text-earth-500">描述你的需求，获取专业建议</p>
+      <div className="px-6 py-4 border-b border-earth-200 bg-gradient-to-r from-primary-50 to-white flex justify-between items-start">
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="p-2 -ml-2 text-earth-500 hover:text-earth-700 hover:bg-earth-100 rounded-lg transition-colors"
+              title="返回首页"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+          )}
+          <div>
+            <h2 className="text-lg font-semibold text-earth-900 flex items-center gap-2">
+              <span>{topic.icon}</span>
+              <span>{topic.name}</span>
+            </h2>
+            <p className="text-sm text-earth-500">{topic.description}</p>
+          </div>
+        </div>
+        {messages.length > 0 && (
+          <button
+            onClick={handleClearChat}
+            className="p-2 text-earth-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+            title="清空对话"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Messages */}
